@@ -1,0 +1,6 @@
+*.sqlite3
+*.session
+.env
+config.json
+buffer.json
+__pycache__/
