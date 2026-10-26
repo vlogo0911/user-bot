@@ -6,3 +6,14 @@ buffer.json
 *.sqlite3
 __pycache__/
 *.pyc
+
+# Maxfiy ma'lumotlar
+config.json
+.env
+*.session
+*.session-journal
+user_session*
+buffer.json
+users.sqlite3
+__pycache__/
+*.pyc
