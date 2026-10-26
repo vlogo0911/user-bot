@@ -30,6 +30,19 @@ def menu():
         [InlineKeyboardButton('📋 Holatim', callback_data='status'), InlineKeyboardButton('📖 Yo‘riqnoma', callback_data='guide')]
     ])
 
+
+
+async def update_menu_message(update, text):
+    q = update.callback_query
+    if not q:
+        return False
+    try:
+        await q.edit_message_text(text, reply_markup=menu())
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            log.warning("Menyu xabari yangilanmadi: %s", e)
+    return True
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     if not u or update.effective_chat.type != 'private':
@@ -46,34 +59,80 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
-    if not u or update.effective_chat.type != 'private': return
+    if not u or not update.effective_chat or update.effective_chat.type != "private":
+        return
+
     now = datetime.now(timezone.utc).isoformat()
     with connect() as c:
-        row = c.execute('SELECT status FROM users WHERE user_id=?', (u.id,)).fetchone()
-        if row and row['status'] == 'approved':
-            await update.effective_message.reply_text('✅ Siz allaqachon tasdiqlangansiz.', reply_markup=menu()); return
-        if row and row['status'] == 'pending':
-            await update.effective_message.reply_text('⏳ So‘rovingiz hali ko‘rib chiqilmoqda.', reply_markup=menu()); return
-        c.execute('''INSERT INTO users(user_id,username,full_name,status,requested_at)
-          VALUES(?,?,?,'pending',?) ON CONFLICT(user_id) DO UPDATE SET
-          username=excluded.username, full_name=excluded.full_name, status='pending',
-          requested_at=excluded.requested_at, reviewed_at=NULL, reviewed_by=NULL''',
-          (u.id, u.username, u.full_name or 'Foydalanuvchi', now))
-    await update.effective_message.reply_text('📨 So‘rov ownerga yuborildi. Tasdiqni kuting.', reply_markup=menu())
-    if OWNER_ID:
-        name = (u.full_name or 'Foydalanuvchi').replace('<','‹').replace('>','›')
-        uname = '@' + u.username if u.username else 'username yo‘q'
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton('✅ Tasdiqlash', callback_data=f'approve:{u.id}'), InlineKeyboardButton('❌ Rad etish', callback_data=f'reject:{u.id}')]])
-        try:
-            await context.bot.send_message(OWNER_ID, f'🆕 Ro‘yxatdan o‘tish so‘rovi\n\n👤 {name}\n🔗 {uname}\n🆔 {u.id}\n🕒 {now}', reply_markup=kb)
-        except Exception:
-            log.exception('Ownerga xabar yuborilmadi')
+        row = c.execute(
+            "SELECT status FROM users WHERE user_id=?", (u.id,)
+        ).fetchone()
+
+        if row and row["status"] == "approved":
+            text = "✅ Siz allaqachon tasdiqlangansiz."
+        elif row and row["status"] == "pending":
+            text = "⏳ So‘rovingiz hali ko‘rib chiqilmoqda."
+        else:
+            c.execute(
+                """INSERT INTO users(user_id,username,full_name,status,requested_at)
+                   VALUES(?,?,?,'pending',?)
+                   ON CONFLICT(user_id) DO UPDATE SET
+                   username=excluded.username,
+                   full_name=excluded.full_name,
+                   status='pending',
+                   requested_at=excluded.requested_at,
+                   reviewed_at=NULL, reviewed_by=NULL""",
+                (u.id, u.username, u.full_name or "Foydalanuvchi", now)
+            )
+            c.commit()
+            text = "📨 So‘rovingiz ownerga yuborildi. Tasdiqni kuting."
+
+            if OWNER_ID:
+                name = (u.full_name or "Foydalanuvchi").replace("<", "‹").replace(">", "›")
+                uname = "@" + u.username if u.username else "username yo‘q"
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve:{u.id}"),
+                    InlineKeyboardButton("❌ Rad etish", callback_data=f"reject:{u.id}")
+                ]])
+                try:
+                    await context.bot.send_message(
+                        OWNER_ID,
+                        f"🆕 Ro‘yxatdan o‘tish so‘rovi\\n\\n👤 {name}\\n🔗 {uname}\\n🆔 {u.id}\\n🕒 {now}",
+                        reply_markup=kb
+                    )
+                except Exception:
+                    log.exception("Ownerga xabar yuborilmadi")
+
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update_menu_message(update, text)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=menu())
+
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
-    with connect() as c: row = c.execute('SELECT status FROM users WHERE user_id=?', (u.id,)).fetchone()
-    labels = {'pending':'⏳ Kutilmoqda', 'approved':'✅ Tasdiqlangan', 'rejected':'❌ Rad etilgan'}
-    await update.effective_message.reply_text('Holat: ' + (labels.get(row['status'], row['status']) if row else 'Ro‘yxatdan o‘tmagansiz.'), reply_markup=menu())
+    if not u:
+        return
+    with connect() as c:
+        row = c.execute(
+            "SELECT status FROM users WHERE user_id=?", (u.id,)
+        ).fetchone()
+
+    labels = {
+        "pending": "⏳ Kutilmoqda",
+        "approved": "✅ Tasdiqlangan",
+        "rejected": "❌ Rad etilgan"
+    }
+    state = labels.get(row["status"], row["status"]) if row else "Ro‘yxatdan o‘tmagansiz."
+    text = "📋 Holatingiz: " + state
+
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update_menu_message(update, text)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=menu())
+
 
 async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
@@ -100,11 +159,23 @@ async def review(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    if q.data == 'register': await q.answer(); await register(update, context)
-    elif q.data == 'status': await q.answer(); await status_cmd(update, context)
-    elif q.data == 'guide':
+    if q.data == "register":
+        await register(update, context)
+    elif q.data == "status":
+        await status_cmd(update, context)
+    elif q.data == "guide":
         await q.answer()
-        await q.message.reply_text('📖 Yo‘riqnoma\n1. Ro‘yxatdan o‘ting va owner tasdig‘ini kuting.\n2. Userbot mijozini o‘z qurilmangizda ishga tushiring.\n3. Telegram telefon raqami va login kodini faqat o‘z qurilmangizdagi mijozga kiriting.\n4. `Saved Messages` ga oddiy matn yuboring — u buffer bo‘ladi.\n5. O‘zingiz foydalanadigan chatda `bufer`, `буфер` yoki `buffer` deb yuboring.\n\nLogin kodi, 2FA paroli va session faylini hech kimga bermang.')
+        text = (
+            "📖 Yo‘riqnoma\\n\\n"
+            "1. Ro‘yxatdan o‘tish tugmasini bosing va owner tasdig‘ini kuting.\\n"
+            "2. Userbotni o‘z qurilmangizda alohida ishga tushiring.\\n"
+            "3. Saved Messages’ga oddiy matn yuboring — u buffer bo‘ladi.\\n"
+            "4. O‘zingiz foydalanadigan chatda bufer, буфер yoki buffer buyrug‘ini ishlating.\\n"
+            "5. Tezlikni ko‘rish: тез. O‘zgartirish: тез 0.1.\\n\\n"
+            "⚠️ Login kodi, 2FA paroli va session faylini hech kimga bermang."
+        )
+        await update_menu_message(update, text)
+
 
 def main():
     if not BOT_TOKEN or not OWNER_ID: raise SystemExit('BOT_TOKEN va OWNER_ID environment variables kerak.')
