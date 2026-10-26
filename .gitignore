@@ -1,6 +1,8 @@
-*.sqlite3
-*.session
 .env
 config.json
+*.session
+*.session-journal
 buffer.json
+*.sqlite3
 __pycache__/
+*.pyc
